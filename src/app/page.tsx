@@ -120,7 +120,7 @@ export default function Home() {
           </div>
           <div className="flex items-center gap-1.5">
             <Activity size={11} />
-            <span>GPT-4o</span>
+            <span>Gemini Active</span>
           </div>
           <div className="flex items-center gap-1.5">
             <Cpu size={11} />
@@ -164,8 +164,8 @@ export default function Home() {
         className="text-center mt-20 pb-8"
       >
         <p className="text-[10px] text-[#6b7280]/25 font-[family-name:var(--font-mono)] tracking-widest uppercase">
-          OpenAI GPT-4o &bull; You.com Intelligence &bull; Deepfake Detection
-          &bull; VERITAS AI v2.0
+          Google Gemini 2.5 Flash &bull; You.com Intelligence &bull; Deepfake Detection
+          &bull; VERITAS AI v2.1
         </p>
       </motion.footer>
     </main>

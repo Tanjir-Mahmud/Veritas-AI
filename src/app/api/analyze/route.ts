@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { GoogleGenAI } from "@google/genai";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -80,14 +81,16 @@ async function fetchWebContext(
     }
 }
 
-/* ─── OpenAI: Text / URL analysis ─── */
+/* ─── Gemini: Text / URL analysis ─── */
 async function analyzeText(input: string, webContext: string) {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) throw new Error("OPENAI_API_KEY not configured");
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) throw new Error("GEMINI_API_KEY not configured");
+
+    const ai = new GoogleGenAI({ apiKey });
 
     const systemPrompt = `You are a forensic analyst specializing in multi-modal digital forgery and misinformation detection. Analyze the provided text against the web search context. Evaluate factual accuracy, detect potential misinformation, and assess AI-generated text likelihood.
 
-Output strictly in JSON (no markdown, no code fences):
+Output strictly in JSON configuration (no markdown, no code fences):
 {
   "score": <number 0-100, where 100 = fully trustworthy>,
   "reasoning": "<detailed 2-4 sentence analysis>",
@@ -114,46 +117,38 @@ ${webContext}
 
 Analyze the claim against the web context and provide your assessment as JSON.`;
 
-    const res = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-            model: "gpt-4o",
-            messages: [
-                { role: "system", content: systemPrompt },
-                { role: "user", content: userPrompt },
-            ],
+    const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [{ role: "user", parts: [{ text: userPrompt }] }],
+        config: {
+            systemInstruction: systemPrompt,
+            responseMimeType: "application/json",
             temperature: 0.3,
-            max_tokens: 600,
-            response_format: { type: "json_object" },
-        }),
+        },
     });
 
-    if (!res.ok) {
-        const body = await res.text();
-        console.error(`OpenAI error: ${res.status}`, body);
-        throw new Error(`OpenAI API returned ${res.status}`);
-    }
-
-    const data = await res.json();
-    const content = data.choices?.[0]?.message?.content;
-    if (!content) throw new Error("Empty OpenAI response");
+    const content = response.text;
+    if (!content) throw new Error("Empty Gemini response");
 
     return JSON.parse(content);
 }
 
-/* ─── OpenAI: Image / Deepfake analysis ─── */
+/* ─── Gemini: Image / Deepfake analysis ─── */
 async function analyzeImage(base64Image: string) {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) throw new Error("OPENAI_API_KEY not configured");
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) throw new Error("GEMINI_API_KEY not configured");
 
-    // Ensure proper data URI format
-    const imageUrl = base64Image.startsWith("data:")
-        ? base64Image
-        : `data:image/jpeg;base64,${base64Image}`;
+    const ai = new GoogleGenAI({ apiKey });
+
+    // Extract base64 payload and MIME type
+    const match = base64Image.match(/^data:(image\/[a-zA-Z]+);base64,(.*)$/);
+    let mimeType = "image/jpeg";
+    let base64Data = base64Image;
+
+    if (match) {
+        mimeType = match[1];
+        base64Data = match[2];
+    }
 
     const systemPrompt = `You are a forensic analyst specializing in deepfake and AI-generated image detection. Examine the provided image with extreme scrutiny for hallmarks of synthetic generation or manipulation.
 
@@ -165,7 +160,7 @@ Check for:
 5. Texture inconsistencies (plastic skin, hair that merges, fabric that warps unrealistically)
 6. Metadata-style tells (too-perfect composition, uncanny valley effects)
 
-Output strictly in JSON (no markdown, no code fences):
+Output strictly in JSON configuration (no markdown, no code fences):
 {
   "score": <number 0-100, where 100 = authentic/trustworthy>,
   "reasoning": "<detailed 2-4 sentence forensic analysis>",
@@ -174,50 +169,36 @@ Output strictly in JSON (no markdown, no code fences):
   "visual_integrity": "<1-2 sentence summary of visual integrity findings>"
 }`;
 
-    const res = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-            model: "gpt-4o",
-            messages: [
-                { role: "system", content: systemPrompt },
-                {
-                    role: "user",
-                    content: [
-                        {
-                            type: "text",
-                            text: "Analyze this image for signs of AI generation, deepfake manipulation, or digital forgery. Provide your forensic assessment as JSON.",
+    const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [
+            {
+                role: "user",
+                parts: [
+                    { text: "Analyze this image for signs of AI generation, deepfake manipulation, or digital forgery. Provide your forensic assessment as JSON." },
+                    {
+                        inlineData: {
+                            data: base64Data,
+                            mimeType: mimeType,
                         },
-                        {
-                            type: "image_url",
-                            image_url: { url: imageUrl, detail: "high" },
-                        },
-                    ],
-                },
-            ],
+                    },
+                ],
+            },
+        ],
+        config: {
+            systemInstruction: systemPrompt,
+            responseMimeType: "application/json",
             temperature: 0.3,
-            max_tokens: 600,
-            response_format: { type: "json_object" },
-        }),
+        },
     });
 
-    if (!res.ok) {
-        const body = await res.text();
-        console.error(`OpenAI vision error: ${res.status}`, body);
-        throw new Error(`OpenAI Vision API returned ${res.status}`);
-    }
-
-    const data = await res.json();
-    const content = data.choices?.[0]?.message?.content;
-    if (!content) throw new Error("Empty OpenAI vision response");
+    const content = response.text;
+    if (!content) throw new Error("Empty Gemini vision response");
 
     return JSON.parse(content);
 }
 
-/* ─── Normalise raw OpenAI JSON into AnalysisResult ─── */
+/* ─── Normalise raw Gemini JSON into AnalysisResult ─── */
 function normalise(
     raw: Record<string, unknown>,
     sources: SourceItem[]
@@ -280,7 +261,7 @@ export async function POST(request: Request) {
             {
                 score: 50,
                 reasoning:
-                    "Analysis service is temporarily unavailable. Please try again.",
+                    "Analysis service (Gemini) is temporarily unavailable. Please try again.",
                 ai_probability: "Unknown",
                 verdict: "Suspicious" as const,
                 visual_integrity: null,
